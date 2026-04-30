@@ -36,6 +36,12 @@ const Form = () => {
     loadCaptcha();
   }, []);
 
+  useEffect(() => {
+    // Preload the loading GIF
+    const img = new Image();
+    img.src = "/search.gif";
+  }, []);
+
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) => {
@@ -125,9 +131,9 @@ const Form = () => {
         <label>CAPTCHA</label>
         <div className="captcha-container">
           {captchaLoading ? (
-            <img src="/loading.gif" height={25}></img>
+            <img src="/loading.gif" height={25} alt="Loading CAPTCHA..."></img>
           ) : (
-            <img src={captchaUrl || "/error.png"} height={25}></img>
+            <img src={captchaUrl || "/error.png"} height={25} alt="CAPTCHA"></img>
           )}
         </div>
         <input
@@ -143,7 +149,7 @@ const Form = () => {
 
         {
           status === "loading" && (
-            <img src="/search.gif" height={150} style={{ marginTop: 20, display: "block", marginLeft: "auto", marginRight: "auto" }}/>
+            <img alt="Fetching your attendance..." src="/search.gif" height={150} style={{ marginTop: 20, display: "block", marginLeft: "auto", marginRight: "auto" }}/>
           )
         }
 
