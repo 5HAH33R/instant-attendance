@@ -153,9 +153,14 @@ const Form = () => {
       {viewState === "pdf" ? (
         <section className="pdf-shell">
           <div className="pdf-toolbar">
-            <button type="button" className="back-button" onClick={handleBackToLogin}>
-              Back to login
-            </button>
+            <div className="pdf-toolbar-left">
+              <button type="button" className="back-button" onClick={handleBackToLogin}>
+                Back to login
+              </button>
+              <button type="button" className="open-button" onClick={() => window.open(pdfUrl || "", "_blank")}>
+                Open PDF
+              </button>
+            </div>
             <p>Attendance PDF is loaded below.</p>
           </div>
           <iframe

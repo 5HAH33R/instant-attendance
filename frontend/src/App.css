@@ -218,13 +218,19 @@ html, body {
   flex-wrap: wrap;
 }
 
+.pdf-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .pdf-toolbar p {
   margin: 0;
   color: #475569;
   font-size: 0.95rem;
 }
 
-.back-button {
+.back-button, .open-button {
   width: auto;
   min-width: 150px;
   padding: 11px 16px;
@@ -234,7 +240,7 @@ html, body {
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.2);
 }
 
-.back-button:hover {
+.back-button:hover, .open-button:hover {
   cursor: pointer;
   transform: translateY(-1px);
   box-shadow: 0 14px 28px rgba(255, 0, 0, 0.24);
