@@ -6,7 +6,7 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "${VITE_BACKEND_URL}/$1"
+      "destination": "/api/proxy?path=$1"
     },
     {
       "source": "/(.*)",
