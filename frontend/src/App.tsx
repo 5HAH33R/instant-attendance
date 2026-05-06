@@ -143,18 +143,16 @@ const Form = () => {
       const response = await fetch(
         `${import.meta.env.VITE_BACKEND_URL}/attendance`,
         {
-          method: "POST",
+          method: "GET",
           credentials: "include",
           headers: {
             "Content-Type": "application/json",
+            "X-Token": captchaToken || "",
+            "X-User-Id": formData.userID,
+            "X-Password": formData.password,
+            "X-Captcha": formData.captcha,
           },
-          body: JSON.stringify({
-            token: captchaToken || "",
-            userID: formData.userID,
-            password: formData.password,
-            captcha: formData.captcha,
-          }),
-        },
+        }
       );
 
       if (!response.ok) {

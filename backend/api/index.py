@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Form, HTTPException, Response
+from fastapi import FastAPI, Form, HTTPException, Header, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import dotenv, httpx, json, os, uuid, upstash_redis
@@ -49,12 +49,15 @@ async def get_captcha():
         response.headers["X-Session-Token"] = token
         return response
 
-@app.post("/attendance")
+@app.get("/attendance")
 async def login(
-    data: LoginData
+    x_token: str = Header(...),
+    x_user_id: str = Header(...),
+    x_password: str = Header(...),
+    x_captcha: str = Header(...),
 ):
-    SESSION = redis.get(data.token)
-    REQUEST_DATA = json.loads(REQUEST % (data.userID, data.password, data.captcha))
+    SESSION = redis.get(x_token)
+    REQUEST_DATA = json.loads(REQUEST % (x_user_id, x_password, x_captcha))
 
     if not SESSION:
         raise HTTPException(status_code=400, detail="Session expired :(")
@@ -67,7 +70,7 @@ async def login(
         if b"Please provide correct" in login_res.content:
             raise HTTPException(status_code=401, detail="Invalid credentials or CAPTCHA :/")
 
-        pdf_res = await client.get(PDF % data.userID)
+        pdf_res = await client.get(PDF % x_user_id)
 
     if not pdf_res.content:
         raise HTTPException(status_code=404, detail="Can't find attendance D:")
