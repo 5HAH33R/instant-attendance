@@ -36,7 +36,7 @@ python -m uvicorn api.index:app
 Simply login to the portal using the ID and password you use in the official portal. Once you've logged in, the app will fetch your attendance and serve it through your web browser.
 
 ## How does it work?
-> This application does not have access to official databases!
+> This application does not have access to official databases and is done through requests!
 
 - The application logs in for you from the official portal
 - Through the home page, It accesses the attendance PDF
