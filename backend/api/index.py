@@ -35,7 +35,7 @@ app.add_middleware(
 
 @app.get("/captcha")
 async def get_captcha():
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         captcha_res = await client.get(CAPTCHA)
         session_id = captcha_res.cookies.get(SESSION_ID)
 
@@ -56,23 +56,69 @@ async def login(
     x_password: str = Header(...),
     x_captcha: str = Header(...),
 ):
-    SESSION = redis.get(x_token)
-    REQUEST_DATA = json.loads(REQUEST % (x_user_id, x_password, x_captcha))
+    try:
+        SESSION = redis.get(x_token)
 
-    if not SESSION:
-        raise HTTPException(status_code=400, detail="Session expired :(")
-    
-    async with httpx.AsyncClient(follow_redirects=True) as client:
-        client.cookies.set(SESSION_ID, SESSION)
+        if not SESSION:
+            raise HTTPException(
+                status_code=400,
+                detail="Session expired :("
+            )
 
-        login_res = await client.post(PORTAL, data=REQUEST_DATA)
+        REQUEST_DATA = json.loads(
+            REQUEST % (x_user_id, x_password, x_captcha)
+        )
 
-        if b"Please provide correct" in login_res.content:
-            raise HTTPException(status_code=401, detail="Invalid credentials or CAPTCHA :/")
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=30.0
+        ) as client:
 
-        pdf_res = await client.get(PDF % x_user_id)
+            client.cookies.set(SESSION_ID, SESSION)
 
-    if not pdf_res.content:
-        raise HTTPException(status_code=404, detail="Can't find attendance D:")
+            login_res = await client.post(
+                PORTAL,
+                data=REQUEST_DATA
+            )
 
-    return Response(content=pdf_res.content, media_type="application/pdf")
+            if b"Please provide correct" in login_res.content:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid credentials or CAPTCHA :/"
+                )
+
+            pdf_res = await client.get(PDF % x_user_id)
+
+        if not pdf_res.content:
+            raise HTTPException(
+                status_code=404,
+                detail="Can't find attendance D:"
+            )
+
+        return Response(
+            content=pdf_res.content,
+            media_type="application/pdf"
+        )
+
+    except httpx.TimeoutException:
+        raise HTTPException(
+            status_code=504,
+            detail="Portal timed out D: Try again later :)"
+        )
+
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Portal request failed: {str(e)}, please try again later :)"
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print("Internal Server Error:", e)
+
+        raise HTTPException(
+            status_code=500,
+            detail="Something went wrong O_O, please try again later :)"
+        )
