@@ -61,6 +61,7 @@ const Form = () => {
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [captchaLoading, setLoading] = useState(true);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfFilename, setPdfFilename] = useState<string>("attendance.pdf");
   const [pdfLoading, setPdfLoading] = useState(false);
   const pdfUrlRef = useRef<string | null>(null);
   const credsRef = useRef<{ token: string; id: string; pass: string; captcha: string } | null>(null);
@@ -185,6 +186,13 @@ const Form = () => {
         throw new Error(text.detail);
       }
 
+      // Extract filename from Content-Disposition header
+      const disposition = response.headers.get("Content-Disposition");
+      if (disposition) {
+        const match = disposition.match(/filename="?([^"]+)"?/);
+        if (match) setPdfFilename(match[1]);
+      }
+
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       pdfUrlRef.current = url;
@@ -226,7 +234,7 @@ const Form = () => {
           className="github-banner"
           onClick={() =>
             window.open(
-              "https://github.com/muhammadrafayasif/instant-attendance",
+              "https://github.com/5HAH33R/instant-attendance",
               "_blank",
             )
           }
@@ -261,13 +269,14 @@ const Form = () => {
               </button>
             </div>
             {pdfUrl && (
-              <button
-                type="button"
+              <a
+                href={pdfUrl}
+                download={pdfFilename}
                 className="open-button"
-                onClick={() => window.open(pdfUrl, "_blank")}
+                style={{ textDecoration: "none" }}
               >
-                Open PDF
-              </button>
+                Download PDF
+              </a>
             )}
           </div>
 
@@ -293,10 +302,8 @@ const Form = () => {
           )}
         </section>
       ) : (
+        <>
         <form className="form" onSubmit={handleForm}>
-          <h5 style={{ textAlign: "center", color: "blue", fontSize: "0.875rem", margin: "0 0 0.5rem 0", border: "2px solid blue", borderRadius: "6px", padding: "0.5rem" }}>
-            Coming Soon: Instant Transcript
-          </h5>
           <h2 style={{ textAlign: "center" }}>NED Instant Attendance</h2>
           <p>Login to your undergraduate portal to view your attendance.</p>
 
@@ -376,6 +383,17 @@ const Form = () => {
             <p className="status-message error">{message}</p>
           )}
         </form>
+        <p className="fork-credit">
+          Fork of{" "}
+          <a href="https://www.linkedin.com/in/muhammadrafayasif/" target="_blank" rel="noopener noreferrer">
+            Muhammad Rafay
+          </a>
+          's code on{" "}
+          <a href="https://github.com/muhammadrafayasif/instant-attendance" target="_blank" rel="noopener noreferrer">
+            GitHub
+          </a>
+        </p>
+        </>
       )}
     </div>
   );

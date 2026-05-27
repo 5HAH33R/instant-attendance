@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import dotenv, httpx, json, os, uuid
 
-from .pdf_parser import parse_attendance_pdf, compute_stats
+from .pdf_parser import parse_attendance_pdf, compute_stats, extract_student_info
 from .course_scraper import scrape_course_names, resolve_course_name
 from .session_store import session_store as redis
 
@@ -93,10 +93,18 @@ async def get_attendance(
         async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
             pdf_content = await _login_and_fetch_pdf(client, x_token, x_user_id, x_password, x_captcha)
 
+        # Extract student name for filename
+        info = extract_student_info(pdf_content)
+        student_name = info.get("name", "").replace(" ", "_") or "Student"
+        roll_no = info.get("roll_no", "") or x_user_id
+        from datetime import datetime
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        filename = f"{student_name}({roll_no})-attendance-{date_str}.pdf"
+
         return Response(
             content=pdf_content,
             media_type="application/pdf",
-            headers={"Content-Disposition": "inline; filename=attendance.pdf"},
+            headers={"Content-Disposition": f'inline; filename="{filename}"'},
         )
 
     except httpx.TimeoutException:

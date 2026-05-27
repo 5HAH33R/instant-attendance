@@ -342,6 +342,25 @@ html, body {
   color: white;
 }
 
+/* ─── Fork Credit ────────────────────────────────────────────────────────── */
+
+.fork-credit {
+  margin-top: 20px;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.35);
+  text-align: center;
+}
+
+.fork-credit a {
+  color: rgba(255, 255, 255, 0.55);
+  text-decoration: none;
+}
+
+.fork-credit a:hover {
+  color: rgba(255, 255, 255, 0.85);
+  text-decoration: underline;
+}
+
 /* ─── PDF Loading ────────────────────────────────────────────────────────── */
 
 .pdf-loading {
@@ -570,8 +589,68 @@ html, body {
 /* ─── Mobile Responsive ──────────────────────────────────────────────────── */
 
 @media (max-width: 600px) {
+  .container {
+    padding: 16px 12px;
+  }
+
   .stats-grid {
     grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .stats-overall {
+    padding: 20px 16px;
+  }
+
+  .overall-percentage {
+    font-size: 2.5rem;
+  }
+
+  .overall-label {
+    font-size: 0.9rem;
+  }
+
+  .overall-detail {
+    font-size: 0.8rem;
+  }
+
+  .overall-skip {
+    font-size: 0.85rem;
+  }
+
+  .course-card {
+    padding: 16px;
+  }
+
+  .course-name {
+    font-size: 0.95rem;
+  }
+
+  .course-code {
+    font-size: 0.75rem;
+  }
+
+  .course-percentage {
+    font-size: 1.2rem;
+  }
+
+  .course-classes {
+    font-size: 0.8rem;
+  }
+
+  .component-row {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .component-bar {
+    order: 3;
+    flex-basis: 100%;
+    margin: 4px 0;
+  }
+
+  .component-stats {
+    font-size: 0.8rem;
   }
 
   .results-toolbar {
@@ -587,10 +666,6 @@ html, body {
 
   .tab-bar {
     align-self: center;
-  }
-
-  .overall-percentage {
-    font-size: 2.5rem;
   }
 }
 

@@ -1,7 +1,40 @@
 import io
 import math
 import re
+from datetime import datetime
 import pdfplumber
+
+
+def extract_student_info(pdf_bytes: bytes) -> dict:
+    """Extract student name and roll number from the attendance PDF.
+
+    Looks for patterns like: Student Name : MUHAMMAD SHAHEER KHAN Roll No. : CT-182
+    Returns dict with 'name' and 'roll_no' keys.
+    """
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text() or ""
+            # Match student name
+            name_match = re.search(r"Student\s*Name\s*:\s*(.+?)(?:\s*Roll|$)", text, re.IGNORECASE)
+            roll_match = re.search(r"Roll\s*No\.?\s*:\s*(\S+)", text, re.IGNORECASE)
+
+            name = name_match.group(1).strip() if name_match else ""
+            roll_no = roll_match.group(1).strip() if roll_match else ""
+
+            if name or roll_no:
+                return {"name": name, "roll_no": roll_no}
+
+    return {"name": "", "roll_no": ""}
+
+
+def generate_attendance_filename(roll_no: str) -> str:
+    """Generate a filename like Name(roll-no)-attendance-date.pdf.
+
+    Uses roll_no from the header since we can't get the name without
+    fetching the PDF first. The name will be added by the caller.
+    """
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    return f"attendance-{roll_no}-{date_str}.pdf"
 
 
 def _clean_number(val) -> int:
