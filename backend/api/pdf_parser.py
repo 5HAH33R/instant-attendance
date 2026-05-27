@@ -218,11 +218,9 @@ def _parse_neduet_table(table: list[list]) -> list[dict]:
             total_classes = theory_held
             attended_classes = theory_present
 
-        percentage = _clean_percentage(row[pct_col]) if pct_col is not None and pct_col < len(row) else 0.0
-
-        # Calculate percentage if not provided
-        if percentage == 0.0 and total_classes > 0:
-            percentage = round((attended_classes / total_classes) * 100, 2)
+        # Always calculate percentage from actual data (don't trust PDF column
+        # which may show theory-only percentage instead of combined)
+        percentage = round((attended_classes / total_classes) * 100, 2) if total_classes > 0 else 0.0
 
         if total_classes > 0:
             theory_pct = round((theory_present / theory_held) * 100, 2) if theory_held > 0 else 0.0
@@ -390,9 +388,11 @@ def compute_stats(courses: list[dict]) -> dict:
         pct = course["percentage"]
 
         # Classes that can be skipped while staying >= 75%
-        if THRESHOLD > 0 and attended > 0:
-            max_total = math.floor(attended / THRESHOLD)
-            classes_to_skip = max(0, max_total - total)
+        # min_required = minimum classes you must attend to stay at 75%
+        # classes_to_skip = how many of the REMAINING classes you can skip
+        if THRESHOLD > 0 and total > 0:
+            min_required = math.ceil(total * THRESHOLD)
+            classes_to_skip = max(0, attended - min_required)
         else:
             classes_to_skip = 0
 
@@ -403,12 +403,12 @@ def compute_stats(courses: list[dict]) -> dict:
         practical_skip = 0
 
         if theory.get("held", 0) > 0 and theory.get("present", 0) > 0:
-            theory_max = math.floor(theory["present"] / THRESHOLD)
-            theory_skip = max(0, theory_max - theory["held"])
+            theory_min = math.ceil(theory["held"] * THRESHOLD)
+            theory_skip = max(0, theory["present"] - theory_min)
 
         if practical.get("held", 0) > 0 and practical.get("present", 0) > 0:
-            practical_max = math.floor(practical["present"] / THRESHOLD)
-            practical_skip = max(0, practical_max - practical["held"])
+            practical_min = math.ceil(practical["held"] * THRESHOLD)
+            practical_skip = max(0, practical["present"] - practical_min)
 
         # Determine status
         if pct >= SAFE:
@@ -439,9 +439,9 @@ def compute_stats(courses: list[dict]) -> dict:
         overall_status = "danger"
 
     overall_skip = 0
-    if THRESHOLD > 0 and attended_all > 0:
-        max_total = math.floor(attended_all / THRESHOLD)
-        overall_skip = max(0, max_total - total_all)
+    if THRESHOLD > 0 and total_all > 0:
+        overall_min = math.ceil(total_all * THRESHOLD)
+        overall_skip = max(0, attended_all - overall_min)
 
     return {
         "courses": enriched,
