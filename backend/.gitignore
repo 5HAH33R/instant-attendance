@@ -3,3 +3,5 @@
 
 # Cache files
 api/__pycache__
+.vercel
+venv

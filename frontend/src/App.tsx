@@ -1,87 +1,44 @@
-import { useEffect, useRef, useState, useCallback } from "react";
-import { Document, Page, pdfjs } from "react-pdf";
-import "react-pdf/dist/Page/AnnotationLayer.css";
-import "react-pdf/dist/Page/TextLayer.css";
+import { useEffect, useRef, useState } from "react";
 import "./App.css";
-
-pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+import type { AttendanceStats } from "./types";
+import StatsDashboard from "./StatsDashboard";
 
 const getRandomNumber = (): number => {
   return Math.floor(Math.random() * 2) + 1;
 };
 
-type ViewState = "login" | "loading" | "pdf";
+type ViewState = "login" | "loading" | "results";
+type ActiveTab = "stats" | "pdf";
 
 // ─── PDF Viewer ───────────────────────────────────────────────────────────────
 
 const PdfViewer = ({ pdfUrl }: { pdfUrl: string }) => {
-  const [numPages, setNumPages] = useState<number>(0);
-  const [pageNumber, setPageNumber] = useState<number>(1);
-  const [containerWidth, setContainerWidth] = useState<number>(0);
-
-  const containerRef = useCallback((node: HTMLDivElement | null) => {
-    if (node) setContainerWidth(node.getBoundingClientRect().width);
-  }, []);
-
   return (
-    <div ref={containerRef} className="pdf-viewer">
-      <Document
-        file={pdfUrl}
-        onLoadSuccess={({ numPages }) => {
-          setNumPages(numPages);
-          setPageNumber(1);
+    <div className="pdf-viewer-native">
+      <object
+        data={pdfUrl}
+        type="application/pdf"
+        width="100%"
+        height="100%"
+        style={{
+          border: "none",
+          minHeight: "80vh",
+          borderRadius: "12px",
         }}
-        onLoadError={(error) => console.error("PDF load error:", error)}
-        loading={
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-              height: "100vh",
-              width: "100%",
-            }}
-          >
-            <div
-              style={{
-                border: "4px solid #f3f3f3",
-                borderTop: "4px solid #ffcc00",
-                borderRadius: "50%",
-                width: "40px",
-                height: "40px",
-                animation: "spin 1s linear infinite",
-              }}
-            />
-          </div>
-        }
       >
-        <Page
-          pageNumber={pageNumber}
-          width={containerWidth || undefined}
-          renderTextLayer={true}
-          renderAnnotationLayer={true}
+        {/* Fallback for browsers that can't render PDF inline */}
+        <embed
+          src={pdfUrl}
+          type="application/pdf"
+          width="100%"
+          height="100%"
+          style={{
+            border: "none",
+            minHeight: "80vh",
+            borderRadius: "12px",
+          }}
         />
-      </Document>
-
-      {numPages > 1 && (
-        <div className="pdf-pagination">
-          <button
-            onClick={() => setPageNumber((p) => Math.max(1, p - 1))}
-            disabled={pageNumber <= 1}
-          >
-            ← Prev
-          </button>
-          <span>
-            Page {pageNumber} of {numPages}
-          </span>
-          <button
-            onClick={() => setPageNumber((p) => Math.min(numPages, p + 1))}
-            disabled={pageNumber >= numPages}
-          >
-            Next →
-          </button>
-        </div>
-      )}
+      </object>
     </div>
   );
 };
@@ -96,13 +53,17 @@ const Form = () => {
   });
 
   const [viewState, setViewState] = useState<ViewState>("login");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("stats");
+  const [statsData, setStatsData] = useState<AttendanceStats | null>(null);
   const [randomizedVal] = useState(getRandomNumber());
   const [message, setMessage] = useState<string | null>(null);
   const [captchaUrl, setCaptchaUrl] = useState<string | null>(null);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [captchaLoading, setLoading] = useState(true);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const pdfUrlRef = useRef<string | null>(null);
+  const credsRef = useRef<{ token: string; id: string; pass: string; captcha: string } | null>(null);
 
   const revokePdfUrl = () => {
     if (pdfUrlRef.current) {
@@ -159,22 +120,65 @@ const Form = () => {
     setViewState("loading");
     setMessage("Fetching attendance");
     revokePdfUrl();
+    setStatsData(null);
+    setPdfUrl(null);
+
+    const creds = {
+      token: captchaToken || "",
+      id: formData.userID,
+      pass: formData.password,
+      captcha: formData.captcha,
+    };
+    credsRef.current = creds;
 
     try {
-      const response = await fetch(
-        `/api/attendance`,
-        {
-          method: "GET",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Token": captchaToken || "",
-            "X-User-Id": formData.userID,
-            "X-Password": formData.password,
-            "X-Captcha": formData.captcha,
-          },
-        }
-      );
+      const response = await fetch(`/api/stats`, {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Token": creds.token,
+          "X-User-Id": creds.id,
+          "X-Password": creds.pass,
+          "X-Captcha": creds.captcha,
+        },
+      });
+
+      if (!response.ok) {
+        const text = await response.json();
+        throw new Error(text.detail);
+      }
+
+      const data: AttendanceStats = await response.json();
+      setStatsData(data);
+      setActiveTab("stats");
+      setViewState("results");
+      setMessage(null);
+    } catch (err: any) {
+      console.error(err);
+      setViewState("login");
+      setMessage(err.message || "Unable to load attendance");
+      await loadCaptcha();
+    }
+  };
+
+  const fetchPdf = async () => {
+    if (pdfUrl || pdfLoading || !credsRef.current) return;
+    setPdfLoading(true);
+
+    try {
+      const creds = credsRef.current;
+      const response = await fetch(`/api/attendance`, {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Token": creds.token,
+          "X-User-Id": creds.id,
+          "X-Password": creds.pass,
+          "X-Captcha": creds.captcha,
+        },
+      });
 
       if (!response.ok) {
         const text = await response.json();
@@ -182,23 +186,21 @@ const Form = () => {
       }
 
       const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
+      const url = URL.createObjectURL(blob);
       pdfUrlRef.current = url;
-
       setPdfUrl(url);
-      setViewState("pdf");
-      setMessage(null);
     } catch (err: any) {
-      console.error(err);
-      setViewState("login");
+      console.error("PDF fetch error:", err);
       setMessage(err.message || "Unable to load PDF");
-      await loadCaptcha();
+    } finally {
+      setPdfLoading(false);
     }
   };
 
   const handleBackToLogin = async () => {
     revokePdfUrl();
     setPdfUrl(null);
+    setStatsData(null);
     setViewState("login");
     setMessage(null);
     setFormData({
@@ -206,12 +208,20 @@ const Form = () => {
       password: "",
       captcha: "",
     });
+    credsRef.current = null;
     await loadCaptcha();
+  };
+
+  const handleTabChange = (tab: ActiveTab) => {
+    setActiveTab(tab);
+    if (tab === "pdf") {
+      fetchPdf();
+    }
   };
 
   return (
     <div className="container">
-      {viewState !== "pdf" && (
+      {viewState !== "results" && (
         <div
           className="github-banner"
           onClick={() =>
@@ -226,29 +236,61 @@ const Form = () => {
         </div>
       )}
 
-      {viewState === "pdf" ? (
-        <section className="pdf-shell">
-          <div className="pdf-toolbar">
-            <div className="pdf-toolbar-left">
+      {viewState === "results" ? (
+        <section className="results-shell">
+          <div className="results-toolbar">
+            <button
+              type="button"
+              className="back-button"
+              onClick={handleBackToLogin}
+            >
+              Go Back
+            </button>
+            <div className="tab-bar">
               <button
-                type="button"
-                className="back-button"
-                onClick={handleBackToLogin}
+                className={`tab-button ${activeTab === "stats" ? "active" : ""}`}
+                onClick={() => handleTabChange("stats")}
               >
-                Go Back
+                Stats
               </button>
+              <button
+                className={`tab-button ${activeTab === "pdf" ? "active" : ""}`}
+                onClick={() => handleTabChange("pdf")}
+              >
+                PDF
+              </button>
+            </div>
+            {pdfUrl && (
               <button
                 type="button"
                 className="open-button"
-                onClick={() => window.open(pdfUrl || "", "_blank")}
+                onClick={() => window.open(pdfUrl, "_blank")}
               >
                 Open PDF
               </button>
-            </div>
-            <p>Attendance PDF is loaded below.</p>
+            )}
           </div>
 
-          <PdfViewer pdfUrl={pdfUrl || ""} />
+          {activeTab === "stats" && statsData && (
+            <StatsDashboard stats={statsData} />
+          )}
+
+          {activeTab === "pdf" && (
+            <>
+              {pdfLoading ? (
+                <div className="pdf-loading">
+                  <div className="spinner" />
+                  <p>Loading PDF...</p>
+                </div>
+              ) : pdfUrl ? (
+                <PdfViewer pdfUrl={pdfUrl} />
+              ) : (
+                <div className="pdf-loading">
+                  <p>Failed to load PDF</p>
+                </div>
+              )}
+            </>
+          )}
         </section>
       ) : (
         <form className="form" onSubmit={handleForm}>

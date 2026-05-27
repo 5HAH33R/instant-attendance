@@ -4,3 +4,5 @@ upstash-redis
 python-dotenv
 uvicorn
 python-multipart
+pdfplumber
+beautifulsoup4
