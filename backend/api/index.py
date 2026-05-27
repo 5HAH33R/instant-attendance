@@ -32,7 +32,7 @@ app.add_middleware(
     expose_headers=["X-Session-Token"]
 )
 
-@app.get("/captcha")
+@app.get("/api/captcha")
 async def get_captcha():
     async with httpx.AsyncClient(timeout=30.0) as client:
         captcha_res = await client.get(CAPTCHA)
@@ -82,7 +82,7 @@ async def _login_and_fetch_pdf(client: httpx.AsyncClient, x_token: str, x_user_i
     return pdf_res.content
 
 
-@app.get("/attendance")
+@app.get("/api/attendance")
 async def get_attendance(
     x_token: str = Header(...),
     x_user_id: str = Header(...),
@@ -122,7 +122,7 @@ async def get_attendance(
         )
 
 
-@app.get("/stats")
+@app.get("/api/stats")
 async def get_stats(
     x_token: str = Header(...),
     x_user_id: str = Header(...),
