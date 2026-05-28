@@ -1,6 +1,9 @@
+import logging
 import os
 import time
 import threading
+
+logger = logging.getLogger(__name__)
 
 
 class InMemorySessionStore:
@@ -25,6 +28,10 @@ class InMemorySessionStore:
         with self._lock:
             self._store[key] = (value, time.time() + seconds)
 
+    def delete(self, key: str) -> None:
+        with self._lock:
+            self._store.pop(key, None)
+
     def cleanup(self) -> None:
         now = time.time()
         with self._lock:
@@ -41,16 +48,16 @@ def _create_session_store():
     if redis_url and redis_token:
         try:
             import upstash_redis
-            print(f"Using Upstash Redis at {redis_url[:30]}...")
+            logger.info("Using Upstash Redis session store")
             return upstash_redis.Redis(url=redis_url, token=redis_token)
         except ImportError:
-            print("upstash-redis not installed, falling back to in-memory store")
+            logger.warning("upstash-redis not installed, falling back to in-memory store")
             return InMemorySessionStore()
         except Exception as e:
-            print(f"Redis connection failed: {e}, falling back to in-memory store")
+            logger.error(f"Redis connection failed: {type(e).__name__}, falling back to in-memory store")
             return InMemorySessionStore()
     else:
-        print("No Redis credentials found, using in-memory session store")
+        logger.info("No Redis credentials found, using in-memory session store")
         return InMemorySessionStore()
 
 

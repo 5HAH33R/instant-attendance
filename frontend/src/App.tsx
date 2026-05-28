@@ -206,6 +206,17 @@ const Form = () => {
   };
 
   const handleBackToLogin = async () => {
+    // Invalidate server-side session
+    if (credsRef.current?.token) {
+      try {
+        await fetch(`/api/logout`, {
+          method: "POST",
+          headers: { "X-Token": credsRef.current.token },
+        });
+      } catch {
+        // Best-effort logout
+      }
+    }
     revokePdfUrl();
     setPdfUrl(null);
     setStatsData(null);
