@@ -63,6 +63,39 @@ def _clean_percentage(val) -> float:
         return 0.0
 
 
+def _parse_credit_hours(cell) -> tuple[int, int]:
+    """Parse a Credit Hrs cell into (theory_credits, practical_credits).
+
+    Handles NEDUET formats like: '3 Th + 1 Pr', '2 Th + 1 Pr', '3Th+1Pr',
+    '4 Th' (theory-only), '1 Pr' (practical-only), '3' (bare number).
+    Returns (0, 0) when the cell can't be parsed.
+    """
+    if cell is None:
+        return (0, 0)
+    text = str(cell).strip()
+    if not text:
+        return (0, 0)
+
+    theory_cr = 0
+    practical_cr = 0
+
+    th_match = re.search(r"(\d+)\s*(?:Th\b|Th\.|Theory)", text, re.IGNORECASE)
+    if th_match:
+        theory_cr = int(th_match.group(1))
+
+    pr_match = re.search(r"(\d+)\s*(?:Pr\b|Pr\.|Practical)", text, re.IGNORECASE)
+    if pr_match:
+        practical_cr = int(pr_match.group(1))
+
+    # Bare number with no Th/Pr labels -> theory credits
+    if theory_cr == 0 and practical_cr == 0:
+        bare = re.fullmatch(r"(\d+)", text)
+        if bare:
+            theory_cr = int(bare.group(1))
+
+    return (theory_cr, practical_cr)
+
+
 def _find_header_row(table: list[list]) -> dict[str, int] | None:
     """Identify the header row and map column names to indices.
 
@@ -155,12 +188,15 @@ def _parse_neduet_table(table: list[list]) -> list[dict]:
 
     header_row = [str(c).strip().lower() if c else "" for c in table[header_idx]]
 
-    # Find course code column and percentage column from header
+    # Find course code, credit hours, and percentage columns from header
     course_col = None
+    credit_col = None
     pct_col = None
     for i, cell in enumerate(header_row):
         if "course" in cell:
             course_col = i
+        if "credit" in cell:
+            credit_col = i
         if "percentage" in cell or cell == "%":
             pct_col = i
 
@@ -251,19 +287,36 @@ def _parse_neduet_table(table: list[list]) -> list[dict]:
             total_classes = theory_held
             attended_classes = theory_present
 
-        # Always calculate percentage from actual data (don't trust PDF column
-        # which may show theory-only percentage instead of combined)
-        percentage = round((attended_classes / total_classes) * 100, 2) if total_classes > 0 else 0.0
-
+        # Calculate percentage ourselves (don't trust the PDF's Percentage
+        # column). Per-course credit-weighted average:
+        #   pct = (theory_pct*theory_cr + practical_pct*practical_cr) / (theory_cr + practical_cr)
+        # Fallback when credit hours can't be parsed: simple combined ratio.
         if total_classes > 0:
             theory_pct = round((theory_present / theory_held) * 100, 2) if theory_held > 0 else 0.0
             practical_pct = round((practical_present / practical_held) * 100, 2) if practical_held > 0 else 0.0
+
+            theory_cr, practical_cr = (0, 0)
+            if credit_col is not None and credit_col < len(row):
+                theory_cr, practical_cr = _parse_credit_hours(row[credit_col])
+
+            if practical_held > 0 and (theory_cr + practical_cr) > 0:
+                percentage = round(
+                    (theory_pct * theory_cr + practical_pct * practical_cr)
+                    / (theory_cr + practical_cr),
+                    2,
+                )
+            elif practical_held == 0 and theory_held > 0:
+                percentage = theory_pct
+            else:
+                percentage = round((attended_classes / total_classes) * 100, 2)
 
             courses.append({
                 "course_code": course_code,
                 "section": "",
                 "theory": {"present": theory_present, "held": theory_held, "percentage": theory_pct},
                 "practical": {"present": practical_present, "held": practical_held, "percentage": practical_pct},
+                "theory_credits": theory_cr,
+                "practical_credits": practical_cr,
                 "total_classes": total_classes,
                 "attended_classes": attended_classes,
                 "percentage": percentage,
@@ -414,6 +467,8 @@ def compute_stats(courses: list[dict]) -> dict:
     enriched = []
     total_all = 0
     attended_all = 0
+    pct_sum = 0.0
+    skip_all = 0
 
     for course in courses:
         total = course["total_classes"]
@@ -461,9 +516,13 @@ def compute_stats(courses: list[dict]) -> dict:
 
         total_all += total
         attended_all += attended
+        pct_sum += pct
+        skip_all += classes_to_skip
 
-    # Overall stats
-    overall_pct = round((attended_all / total_all) * 100, 2) if total_all > 0 else 0.0
+    # Overall stats: mean of the per-course (weighted) percentages,
+    # and the sum of per-course skippable classes (75% is per-course,
+    # so surplus attendance must not transfer between courses).
+    overall_pct = round(pct_sum / len(enriched), 2) if enriched else 0.0
     if overall_pct >= SAFE:
         overall_status = "safe"
     elif overall_pct >= WARNING:
@@ -471,10 +530,7 @@ def compute_stats(courses: list[dict]) -> dict:
     else:
         overall_status = "danger"
 
-    overall_skip = 0
-    if THRESHOLD > 0 and total_all > 0:
-        overall_min = math.ceil(total_all * THRESHOLD)
-        overall_skip = max(0, attended_all - overall_min)
+    overall_skip = skip_all
 
     return {
         "courses": enriched,
