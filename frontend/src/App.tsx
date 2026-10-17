@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import type { AttendanceStats } from "./types";
 import StatsDashboard from "./StatsDashboard";
+import { checkSession, clearSession, saveSession } from "./session";
 
 const getRandomNumber = (): number => {
   return Math.floor(Math.random() * 2) + 1;
@@ -9,6 +10,19 @@ const getRandomNumber = (): number => {
 
 type ViewState = "login" | "loading" | "results";
 type ActiveTab = "stats" | "pdf";
+
+const LOADING_STAGES = [
+  "Logging in to portal...",
+  "Fetching attendance...",
+  "Computing your stats...",
+];
+
+const base64ToBlob = (b64: string): Blob => {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: "application/pdf" });
+};
 
 // ─── PDF Viewer ───────────────────────────────────────────────────────────────
 
@@ -63,6 +77,7 @@ const Form = () => {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfFilename, setPdfFilename] = useState<string>("attendance.pdf");
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [stage, setStage] = useState(0);
   const pdfUrlRef = useRef<string | null>(null);
   const credsRef = useRef<{ token: string; id: string; pass: string; captcha: string } | null>(null);
 
@@ -88,9 +103,60 @@ const Form = () => {
     setLoading(false);
   };
 
+  // Render the results dashboard from a stats payload (fresh login or
+  // refresh-restore). Does NOT persist anything - callers decide.
+  const showResults = (data: AttendanceStats) => {
+    revokePdfUrl();
+    if (data.pdf_base64) {
+      try {
+        const url = URL.createObjectURL(base64ToBlob(data.pdf_base64));
+        pdfUrlRef.current = url;
+        setPdfUrl(url);
+      } catch {
+        setPdfUrl(null);
+      }
+    } else {
+      setPdfUrl(null);
+    }
+    if (data.pdf_filename) setPdfFilename(data.pdf_filename);
+    setStatsData(data);
+    setActiveTab("stats");
+    setViewState("results");
+    setMessage(null);
+  };
+
+  // Startup: restore a dashboard that was loaded less than 2 minutes ago so a
+  // refresh shows the same logged-in view instantly (0 network requests).
+  // Expiry is checked ONLY here - never while the student is viewing, and the
+  // password is never stored (restored sessions carry an empty password).
   useEffect(() => {
-    loadCaptcha();
+    const check = checkSession();
+    if (check.status === "fresh") {
+      const { token, id, stats } = check.session;
+      credsRef.current = { token, id, pass: "", captcha: "" };
+      showResults(stats);
+    } else {
+      if (check.status === "expired") {
+        // Best-effort cleanup of the old captcha session server-side.
+        fetch("/api/logout", {
+          method: "POST",
+          headers: { "X-Token": check.token },
+        }).catch(() => {});
+      }
+      loadCaptcha();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Loading stage text cycles while the portal request is in flight.
+  useEffect(() => {
+    if (viewState !== "loading") return;
+    setStage(0);
+    const iv = setInterval(() => {
+      setStage((s) => (s + 1) % LOADING_STAGES.length);
+    }, 3000);
+    return () => clearInterval(iv);
+  }, [viewState]);
 
   useEffect(() => {
     const video = document.createElement("video");
@@ -119,7 +185,6 @@ const Form = () => {
   const handleForm = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setViewState("loading");
-    setMessage("Fetching attendance");
     revokePdfUrl();
     setStatsData(null);
     setPdfUrl(null);
@@ -151,10 +216,9 @@ const Form = () => {
       }
 
       const data: AttendanceStats = await response.json();
-      setStatsData(data);
-      setActiveTab("stats");
-      setViewState("results");
-      setMessage(null);
+      showResults(data);
+      // Persist for refresh-restore within the 2-minute window (no password).
+      saveSession(creds.token, creds.id, data);
     } catch (err: any) {
       console.error(err);
       setViewState("login");
@@ -218,6 +282,7 @@ const Form = () => {
       }
     }
     revokePdfUrl();
+    clearSession();
     setPdfUrl(null);
     setStatsData(null);
     setViewState("login");
@@ -375,9 +440,16 @@ const Form = () => {
 
           {viewState === "loading" && (
             <>
-              <p className="status-message loading">
-                Searching for your attendance...
+              <p className="status-message loading" aria-live="polite">
+                {LOADING_STAGES[stage]}
               </p>
+              <div
+                className="loading-progress"
+                role="progressbar"
+                aria-label="Loading attendance"
+              >
+                <div className="loading-progress-fill" />
+              </div>
               <video
                 src={`/searching${randomizedVal}.mp4`}
                 autoPlay

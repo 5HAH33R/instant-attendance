@@ -1,6 +1,9 @@
+import asyncio
+import base64
 import logging
 import re
 import dotenv, httpx, json, os, uuid
+from datetime import datetime
 from fastapi import FastAPI, Form, HTTPException, Header, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -114,11 +117,12 @@ async def get_captcha(request: Request):
         return response
 
 
-async def _login_and_fetch_pdf(client: httpx.AsyncClient, x_token: str, x_user_id: str, x_password: str, x_captcha: str) -> bytes:
-    """Shared logic: validate session, login to portal, fetch attendance PDF.
+async def _portal_login(client: httpx.AsyncClient, x_token: str, x_user_id: str, x_password: str, x_captcha: str) -> None:
+    """Validate the captcha session and log in to the NEDUET portal.
 
-    Uses the caller-provided client. Returns the PDF bytes.
-    The client remains open for the caller to reuse (e.g., scraping).
+    Seeds the portal session cookie on the caller-provided client and leaves
+    it authenticated for subsequent requests (PDF fetch, scraping).
+    Password is used only in-memory for this portal POST and never stored.
     """
     x_user_id = _validate_user_id(x_user_id)
 
@@ -139,6 +143,9 @@ async def _login_and_fetch_pdf(client: httpx.AsyncClient, x_token: str, x_user_i
             detail="Invalid credentials or CAPTCHA :/"
         )
 
+
+async def _fetch_pdf(client: httpx.AsyncClient, x_user_id: str) -> bytes:
+    """Download the attendance PDF using an already-authenticated client."""
     pdf_res = await client.get(PDF % x_user_id)
 
     if not pdf_res.content:
@@ -148,6 +155,25 @@ async def _login_and_fetch_pdf(client: httpx.AsyncClient, x_token: str, x_user_i
         )
 
     return pdf_res.content
+
+
+async def _login_and_fetch_pdf(client: httpx.AsyncClient, x_token: str, x_user_id: str, x_password: str, x_captcha: str) -> bytes:
+    """Shared logic: validate session, login to portal, fetch attendance PDF.
+
+    Uses the caller-provided client. Returns the PDF bytes.
+    The client remains open for the caller to reuse (e.g., scraping).
+    """
+    await _portal_login(client, x_token, x_user_id, x_password, x_captcha)
+    return await _fetch_pdf(client, x_user_id)
+
+
+def _build_pdf_filename(pdf_bytes: bytes, fallback_roll: str) -> str:
+    """Derive the download filename from the PDF's own student info."""
+    info = extract_student_info(pdf_bytes)
+    student_name = _sanitize_filename(info.get("name", "").replace(" ", "_")) or "Student"
+    roll_no = _sanitize_filename(info.get("roll_no", "")) or fallback_roll
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    return f"{student_name}({roll_no})-attendance-{date_str}.pdf"
 
 
 @app.get("/api/attendance")
@@ -166,13 +192,7 @@ async def get_attendance(
         async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
             pdf_content = await _login_and_fetch_pdf(client, x_token, x_user_id, x_password, x_captcha)
 
-        # Extract student name for filename (sanitized for Content-Disposition)
-        info = extract_student_info(pdf_content)
-        student_name = _sanitize_filename(info.get("name", "").replace(" ", "_")) or "Student"
-        roll_no = _sanitize_filename(info.get("roll_no", "")) or x_user_id
-        from datetime import datetime
-        date_str = datetime.now().strftime("%Y-%m-%d")
-        filename = f"{student_name}({roll_no})-attendance-{date_str}.pdf"
+        filename = _build_pdf_filename(pdf_content, x_user_id)
 
         return Response(
             content=pdf_content,
@@ -217,13 +237,21 @@ async def get_stats(
 
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
-            pdf_bytes = await _login_and_fetch_pdf(client, x_token, x_user_id, x_password, x_captcha)
+            # Login first: both the PDF fetch and the course-name scrape need
+            # the authenticated session. Afterwards run them concurrently -
+            # the scrape returns instantly from cache when warm.
+            await _portal_login(client, x_token, x_user_id, x_password, x_captcha)
 
-            # Try to scrape course names from the portal using the same session
-            try:
-                scraped_names = await scrape_course_names(client)
-            except Exception:
-                scraped_names = {}
+            async def _scrape_safe() -> dict[str, str]:
+                try:
+                    return await scrape_course_names(client)
+                except Exception:
+                    return {}
+
+            pdf_bytes, scraped_names = await asyncio.gather(
+                _fetch_pdf(client, x_user_id),
+                _scrape_safe(),
+            )
 
         # Parse the PDF and compute stats
         courses = parse_attendance_pdf(pdf_bytes)
@@ -241,6 +269,12 @@ async def get_stats(
             course["course_name"] = resolve_course_name(
                 course["course_code"], scraped_names
             )
+
+        # Ship the PDF alongside the stats so the frontend can show the PDF
+        # tab and restore the dashboard after a refresh without a second
+        # portal round-trip (never includes the password).
+        stats["pdf_filename"] = _build_pdf_filename(pdf_bytes, x_user_id)
+        stats["pdf_base64"] = base64.b64encode(pdf_bytes).decode("ascii")
 
         return stats
 

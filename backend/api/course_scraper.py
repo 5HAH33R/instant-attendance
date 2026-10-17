@@ -168,8 +168,12 @@ def _cache_semester(semid: str, course_map: dict[str, str]) -> None:
 
 
 async def scrape_course_names(client) -> dict[str, str]:
-    """Scrape course code -> name mappings from the NEDUET portal.
+    """Resolve course code -> name mappings, preferring the session-store cache.
 
+    Warm path: return the cached map (`course_map:latest`, 6h TTL) immediately
+    with zero portal requests.
+
+    Cold path (cache miss):
     1. GET the dashboard and discover the current semester's
        Students_Registered_Courses.jsp?semid=N link.
     2. GET that page and parse the registered-courses table.
@@ -178,6 +182,10 @@ async def scrape_course_names(client) -> dict[str, str]:
     On any failure, falls back to the last cached map (if any), else {}.
     Uses the already-authenticated httpx client session.
     """
+    cached = _cache_get(_LATEST_KEY)
+    if cached:
+        return cached
+
     portal_base = os.getenv("PORTAL", "")
     if not portal_base:
         return {}
